@@ -19,12 +19,12 @@ def main():
         target = Config(args.target)
         logger.debug('Testing target DB connection')
         Db.test(target)
+
+        logger.debug(getSQLCommandForLogging(src, target))
+        run(logger, src, target)
     except ValueError as error:
         logger.critical(error)
         exit(1)
-
-    run(logger, src, target)
-    exit(0)
 
 
 def getCliArguments():
@@ -43,36 +43,39 @@ def getCliArguments():
     return ap.parse_args()
 
 
-def run(logger: Logger, src: Config, target: Config):
-    logger.debug(
-        '%s | %s' % (
-            'Running: mysqldump %s -h %s -P %s --verbose%s' % (
-                src.db['database'],
-                src.db['host'],
-                src.db['port'],
-                ''.join(src.options),
-            ),
-            'mysql %s -h %s -P %s%s' % (
-                target.db['database'],
-                target.db['host'],
-                target.db['port'],
-                ''.join(target.options)
-            )
+def getSQLCommandForLogging(src: Config, target: Config):
+    return '%s | %s' % (
+        'Running: mysqldump %s -h %s -P %s --verbose%s' % (
+            src.db['database'],
+            src.db['host'],
+            src.db['port'],
+            ''.join(src.options),
+        ),
+        'mysql %s -h %s -P %s%s' % (
+            target.db['database'],
+            target.db['host'],
+            target.db['port'],
+            ''.join(target.options)
         )
     )
 
+
+def run(logger: Logger, src: Config, target: Config):
     dumpOutput = Db.copyDb(src, target)
+
+    # MySQL Dump Verbose Mode outputs 3 lines at the start
+    # 3 lines at the end and 4 lines per table. So we use this
+    # to calculate the number of rows we expect to be output
     maxValue = (Db.numberOfTables(src) * 4) + 6
 
     with progressbar.ProgressBar(max_value=maxValue) as bar:
-        i = 0
-        errors = []
+        output = []
+
         while True:
-            i = i + 1
-            output = dumpOutput.stderr.readline().decode('utf8').strip()
-            errors.append(output)
-            bar.update(i)
+            response = dumpOutput.stderr.readline().decode('utf8').strip()
+            output.append(response)
+            bar.update(output.length())
             if not output:
-                if i < maxValue:
-                    print('\n'.join(errors))
+                if output.length() < maxValue:
+                    raise ValueError('\n'.join(output))
                 break
